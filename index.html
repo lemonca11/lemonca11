@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>洋流模拟</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background: radial-gradient(circle at 20% 20%, #0c1d3a, #061021 60%, #04070f);
+        color: #f1f5f9;
+      }
+
+      header {
+        padding: 1.2rem clamp(1.2rem, 3vw, 2.4rem) 0.5rem;
+        text-align: center;
+      }
+
+      h1 {
+        margin: 0;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+      }
+
+      p {
+        margin: 0.5rem auto;
+        max-width: min(640px, 90vw);
+        line-height: 1.6;
+        color: #cbd5f5;
+      }
+
+      .stage {
+        flex: 1;
+        display: grid;
+        place-items: center;
+        padding: 1rem;
+      }
+
+      canvas {
+        width: min(960px, 95vw);
+        aspect-ratio: 16 / 9;
+        border-radius: 18px;
+        box-shadow: 0 12px 30px rgba(11, 28, 63, 0.6);
+        background: linear-gradient(160deg, rgba(15, 64, 134, 0.8), rgba(12, 29, 65, 0.95));
+      }
+
+      .controls {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 1rem;
+        padding: 1rem clamp(1rem, 3vw, 2.5rem) 2rem;
+        flex-wrap: wrap;
+      }
+
+      label {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-size: 0.95rem;
+        color: #dce4ff;
+      }
+
+      input[type="range"] {
+        accent-color: #38bdf8;
+      }
+
+      footer {
+        text-align: center;
+        font-size: 0.85rem;
+        color: #94a3b8;
+        padding-bottom: 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>海洋洋流可视化模拟</h1>
+      <p>
+        粒子沿着动态向量场流动，模拟了大尺度洋流的漩涡与环流结构。拖动滑块可调整流速，体会海洋环流的节奏。
+      </p>
+    </header>
+
+    <div class="stage">
+      <canvas id="ocean" width="1280" height="720"></canvas>
+    </div>
+
+    <div class="controls">
+      <label>
+        流速倍率
+        <input id="speedControl" type="range" min="10" max="60" value="30" />
+      </label>
+      <label>
+        粒子数量
+        <input id="particleControl" type="range" min="200" max="1200" value="600" />
+      </label>
+    </div>
+
+    <footer>使用纯 JavaScript + Canvas 即时计算的矢量场洋流模拟。</footer>
+
+    <script>
+      const canvas = document.getElementById("ocean");
+      const ctx = canvas.getContext("2d");
+      const speedControl = document.getElementById("speedControl");
+      const particleControl = document.getElementById("particleControl");
+
+      const particles = [];
+      let targetParticleCount = Number(particleControl.value);
+
+      const config = {
+        baseSpeed: 0.12,
+        fade: 0.05,
+        hueOffset: 180,
+        trailAlpha: 0.08,
+        timeScale: 0.0008,
+      };
+
+      function initParticles() {
+        particles.length = 0;
+        for (let i = 0; i < targetParticleCount; i++) {
+          particles.push(createParticle());
+        }
+      }
+
+      function createParticle() {
+        return {
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          life: Math.random() * 400 + 200,
+          speedOffset: Math.random() * 0.4 + 0.8,
+        };
+      }
+
+      function vectorField(x, y, t) {
+        const scale = 0.0022;
+        const nx = x * scale;
+        const ny = y * scale;
+        const angle =
+          Math.sin(nx * 2 + t * 0.4) * 1.4 +
+          Math.cos(ny * 2.3 - t * 0.6) * 1.2 +
+          Math.sin((nx + ny) * 1.5 + t * 0.2);
+        const magnitude = 1.1 + 0.3 * Math.sin(nx * 1.7 - t * 0.5);
+        return {
+          vx: Math.cos(angle) * magnitude,
+          vy: Math.sin(angle) * magnitude,
+        };
+      }
+
+      function drawBackground() {
+        const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        gradient.addColorStop(0, "rgba(15, 73, 134, 0.25)");
+        gradient.addColorStop(0.5, "rgba(9, 29, 55, 0.35)");
+        gradient.addColorStop(1, "rgba(4, 11, 20, 0.55)");
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+
+      function updateParticles(delta, t) {
+        const speedFactor = Number(speedControl.value) / 30;
+        const fade = 1 - config.trailAlpha;
+
+        ctx.fillStyle = `rgba(3, 9, 20, ${fade})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        for (let particle of particles) {
+          if (particle.life-- <= 0) {
+            Object.assign(particle, createParticle());
+          }
+
+          const { vx, vy } = vectorField(particle.x, particle.y, t);
+          const speed =
+            config.baseSpeed * speedFactor * particle.speedOffset * delta;
+          particle.x += vx * speed;
+          particle.y += vy * speed;
+
+          if (particle.x < 0 || particle.x > canvas.width || particle.y < 0 || particle.y > canvas.height) {
+            particle.x = (particle.x + canvas.width) % canvas.width;
+            particle.y = (particle.y + canvas.height) % canvas.height;
+          }
+
+          const hue = (config.hueOffset + vx * 40 + vy * 50) % 360;
+          ctx.strokeStyle = `hsla(${hue}, 85%, 65%, 0.9)`;
+          ctx.lineWidth = 1.2;
+
+          ctx.beginPath();
+          ctx.moveTo(particle.x, particle.y);
+          ctx.lineTo(particle.x - vx * 1.5, particle.y - vy * 1.5);
+          ctx.stroke();
+        }
+      }
+
+      function adjustParticles() {
+        targetParticleCount = Number(particleControl.value);
+        const difference = targetParticleCount - particles.length;
+        if (difference > 0) {
+          for (let i = 0; i < difference; i++) {
+            particles.push(createParticle());
+          }
+        } else if (difference < 0) {
+          particles.splice(targetParticleCount);
+        }
+      }
+
+      function resizeCanvas() {
+        const displayWidth = canvas.clientWidth;
+        const displayHeight = canvas.clientHeight;
+        const ratio = window.devicePixelRatio || 1;
+        const newWidth = Math.round(displayWidth * ratio);
+        const newHeight = Math.round(displayHeight * ratio);
+
+        if (canvas.width !== newWidth || canvas.height !== newHeight) {
+          canvas.width = newWidth;
+          canvas.height = newHeight;
+          ctx.scale(ratio, ratio);
+        }
+      }
+
+      let lastTime = performance.now();
+      function animate(now) {
+        const delta = (now - lastTime) * 0.06;
+        lastTime = now;
+        const t = now * config.timeScale;
+        updateParticles(delta, t);
+        requestAnimationFrame(animate);
+      }
+
+      speedControl.addEventListener("input", () => {
+        document.documentElement.style.setProperty(
+          "--speed", Number(speedControl.value)
+        );
+      });
+
+      particleControl.addEventListener("input", adjustParticles);
+      window.addEventListener("resize", () => {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        resizeCanvas();
+        drawBackground();
+      });
+
+      resizeCanvas();
+      drawBackground();
+      initParticles();
+      requestAnimationFrame(animate);
+    </script>
+  </body>
+</html>
